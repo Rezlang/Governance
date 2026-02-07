@@ -1,0 +1,2 @@
+pydantic>=2.12
+zai-sdk>=0.1.0
