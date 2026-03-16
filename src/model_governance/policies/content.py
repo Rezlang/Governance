@@ -68,6 +68,19 @@ class HTMLBlockingPolicy(Policy):
 
         return PolicyResult(allowed=True, reason="HTML contains only allowed tags")
 
+    def modify_content(self, content: str) -> str:
+        """Remove HTML tags from content.
+
+        Args:
+            content: The content to modify.
+
+        Returns:
+            Content with HTML tags removed.
+        """
+        # Remove all HTML tags
+        cleaned = self._html_pattern.sub("", content)
+        return cleaned.strip()
+
 
 class JSONBlockingPolicy(Policy):
     """Policy to block JSON content in outputs.
@@ -116,6 +129,17 @@ class JSONBlockingPolicy(Policy):
             )
         except json.JSONDecodeError:
             return PolicyResult(allowed=True, reason="Not valid JSON")
+
+    def modify_content(self, content: str) -> str:
+        """Escape JSON braces to prevent them from being recognized.
+
+        Args:
+            content: The content to modify.
+
+        Returns:
+            Content with JSON braces escaped.
+        """
+        return content.replace("{", "{{").replace("}", "}}")
 
 
 class CodeBlockPolicy(Policy):
@@ -195,3 +219,16 @@ class CodeBlockPolicy(Policy):
                 )
 
         return PolicyResult(allowed=True, reason="Code blocks comply with policy")
+
+    def modify_content(self, content: str) -> str:
+        """Remove code blocks from content.
+
+        Args:
+            content: The content to modify.
+
+        Returns:
+            Content with code blocks removed.
+        """
+        # Remove code blocks
+        cleaned = self._code_block_pattern.sub("[CODE REMOVED]", content)
+        return cleaned

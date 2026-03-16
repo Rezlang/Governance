@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from model_governance.checkers.base import CheckerResult
 from model_governance.validators.topics import TopicGuard
 
 
@@ -24,7 +25,7 @@ class EmbeddingSemanticChecker:
             guards: List of topic guards for content checking.
             similarity_threshold: Threshold for considering content similar.
         """
-        from model_governance.validators.topics import SelfHarmGuard, HateSpeechGuard, ThreatsGuard
+        from model_governance.validators.topics import HateSpeechGuard, SelfHarmGuard, ThreatsGuard
 
         self._guards = guards or [
             SelfHarmGuard(),
@@ -34,7 +35,7 @@ class EmbeddingSemanticChecker:
         self._similarity_threshold = similarity_threshold
         self._harmful_embeddings: dict[str, Any] = {}
 
-    async def check(self, content: str, context: dict) -> tuple[bool, list[str]]:
+    async def check(self, content: str, context: dict) -> CheckerResult:
         """Check content using semantic analysis.
 
         In production, this would:
@@ -47,16 +48,29 @@ class EmbeddingSemanticChecker:
             context: Additional context for the check.
 
         Returns:
-            Tuple of (is_safe, list_of_issues).
+            CheckerResult with safety check outcome.
         """
         issues: list[str] = []
+        confidences: list[float] = []
 
         for guard in self._guards:
             result = await guard.check(content, context)
             if not result.is_safe and result.confidence >= self._similarity_threshold:
                 issues.append(f"{guard.name}: {result.reason}")
+                confidences.append(result.confidence)
 
-        return len(issues) == 0, issues
+        if issues:
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.8
+            return CheckerResult.unsafe(
+                issues=issues,
+                confidence=avg_confidence,
+                metadata={"checker": "EmbeddingSemanticChecker", "threshold": self._similarity_threshold},
+            )
+
+        return CheckerResult.safe(
+            confidence=1.0,
+            metadata={"checker": "EmbeddingSemanticChecker", "threshold": self._similarity_threshold},
+        )
 
     async def initialize_harmful_embeddings(self) -> None:
         """Initialize embeddings for harmful content.

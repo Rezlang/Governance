@@ -1,10 +1,10 @@
 """Attachment pipeline for file input validation."""
 
 import base64
-from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from model_governance.core.modes import EnforcementMode
 from model_governance.pipelines.base import InputPipeline, PipelineResult
 from model_governance.trust.classifier import TrustClassifier, TrustContext
 from model_governance.trust.levels import TrustLevel
@@ -49,6 +49,7 @@ class AttachmentPipeline(InputPipeline):
         max_size: int = 10 * 1024 * 1024,  # 10MB default
         allowed_mime_types: set[str] | None = None,
         blocked_mime_types: set[str] | None = None,
+        mode: EnforcementMode = EnforcementMode.BLOCK,
     ) -> None:
         """Initialize the attachment pipeline.
 
@@ -57,8 +58,9 @@ class AttachmentPipeline(InputPipeline):
             max_size: Maximum file size in bytes.
             allowed_mime_types: Set of allowed MIME types. If None, basic types allowed.
             blocked_mime_types: Set of blocked MIME types.
+            mode: The enforcement mode.
         """
-        super().__init__()
+        super().__init__(mode=mode)
         self._classifier = classifier or TrustClassifier()
         self._max_size = max_size
         self._allowed_mime_types = {m.lower() for m in (allowed_mime_types or set())}
@@ -90,6 +92,7 @@ class AttachmentPipeline(InputPipeline):
         mime_type: str,
         size: int | None = None,
         authentication_level: TrustLevel | None = None,
+        mode: EnforcementMode | None = None,
     ) -> PipelineResult:
         """Process attachment with validation.
 
@@ -99,10 +102,12 @@ class AttachmentPipeline(InputPipeline):
             mime_type: MIME type of the file.
             size: Optional file size in bytes.
             authentication_level: Optional trust level from authentication.
+            mode: The enforcement mode. Overrides __init__ default.
 
         Returns:
             PipelineResult with validation results and trust level.
         """
+        effective_mode = mode or self._mode
         mime_type = mime_type.lower()
 
         # Check blocked MIME types
@@ -112,6 +117,7 @@ class AttachmentPipeline(InputPipeline):
                 errors=[f"File type '{mime_type}' is blocked"],
                 blocked=True,
                 block_reason=f"Blocked file type: {mime_type}",
+                mode=effective_mode.value,
             )
 
         # Check allowed MIME types
@@ -121,6 +127,7 @@ class AttachmentPipeline(InputPipeline):
                 errors=[f"File type '{mime_type}' is not allowed"],
                 blocked=True,
                 block_reason=f"File type not in allowlist: {mime_type}",
+                mode=effective_mode.value,
             )
 
         # Decode base64 content
@@ -132,6 +139,7 @@ class AttachmentPipeline(InputPipeline):
                 errors=["Invalid base64 encoding"],
                 blocked=True,
                 block_reason="Invalid base64 content",
+                mode=effective_mode.value,
             )
 
         actual_size = len(content_bytes)
@@ -143,6 +151,7 @@ class AttachmentPipeline(InputPipeline):
                 errors=[f"Size mismatch: declared {size}, actual {actual_size}"],
                 blocked=True,
                 block_reason="File size mismatch",
+                mode=effective_mode.value,
             )
 
         if actual_size > self._max_size:
@@ -151,6 +160,7 @@ class AttachmentPipeline(InputPipeline):
                 errors=[f"File too large: {actual_size} bytes (max {self._max_size})"],
                 blocked=True,
                 block_reason="File exceeds size limit",
+                mode=effective_mode.value,
             )
 
         try:
@@ -166,6 +176,7 @@ class AttachmentPipeline(InputPipeline):
                 errors=[f"Validation failed: {e}"],
                 blocked=True,
                 block_reason="Invalid attachment format",
+                mode=effective_mode.value,
             )
 
         # Classify trust level (LOW for attachments)
@@ -181,6 +192,7 @@ class AttachmentPipeline(InputPipeline):
             data=validated.model_dump(),
             trust_level=trust_level,
             blocked=False,
+            mode=effective_mode.value,
             metadata={
                 "source": "attachment",
                 "filename": validated.filename,

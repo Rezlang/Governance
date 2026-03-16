@@ -3,36 +3,12 @@
 import re
 from typing import Any
 
+from model_governance.core.patterns import SecurityPatterns
 
-# Prompt injection patterns
-INJECTION_PATTERNS = [
-    "ignore previous",
-    "disregard above",
-    "override instructions",
-    "forget everything",
-    "new instructions:",
-    "ignore your programming",
-    "disregard your training",
-    "<end>",
-    "<|end|>",
-    "[DONE]",
-    "\\begin{system}",
-    "act as",
-    "pretend to be",
-    "roleplay as",
-]
-
-# Code execution patterns
-CODE_EXECUTION_PATTERNS = [
-    "eval(",
-    "exec(",
-    "compile(",
-    "__import__",
-    "os.system",
-    "subprocess",
-    "pickle.loads",
-    "marshal.loads",
-]
+# For backward compatibility, export from SecurityPatterns
+INJECTION_PATTERNS = SecurityPatterns.INJECTION_PATTERNS
+CODE_EXECUTION_PATTERNS = SecurityPatterns.CODE_EXECUTION_PATTERNS
+SQL_INJECTION_PATTERNS = SecurityPatterns.SQL_INJECTION_PATTERNS
 
 
 def validate_no_injection(content: str, patterns: list[str] | None = None) -> dict[str, Any]:
@@ -45,7 +21,7 @@ def validate_no_injection(content: str, patterns: list[str] | None = None) -> di
     Returns:
         Dict with 'valid' (bool) and 'reason' (str) keys.
     """
-    check_patterns = patterns or INJECTION_PATTERNS
+    check_patterns = patterns or SecurityPatterns.get_injection_patterns()
     content_lower = content.lower()
 
     for pattern in check_patterns:
@@ -69,7 +45,7 @@ def validate_no_code_execution(content: str, patterns: list[str] | None = None) 
     Returns:
         Dict with 'valid' (bool) and 'reason' (str) keys.
     """
-    check_patterns = patterns or CODE_EXECUTION_PATTERNS
+    check_patterns = patterns or SecurityPatterns.get_code_execution_patterns()
     content_lower = content.lower()
 
     for pattern in check_patterns:
@@ -161,4 +137,59 @@ def validate_url(content: str, allow_urls: bool = True) -> dict[str, Any]:
     return {
         "valid": True,
         "reason": f"URL validation passed: {len(urls)} URL(s) found" if allow_urls else "No URLs detected",
+    }
+
+
+def validate_no_sql_injection(content: str, patterns: list[str] | None = None) -> dict[str, Any]:
+    """Validate content doesn't contain SQL injection patterns.
+
+    Args:
+        content: The content to validate (typically SQL queries or parameters).
+        patterns: Optional custom patterns to check. Uses defaults if not provided.
+
+    Returns:
+        Dict with 'valid' (bool) and 'reason' (str) keys.
+    """
+    check_patterns = patterns or SecurityPatterns.get_sql_injection_patterns()
+    content_lower = content.lower()
+
+    for pattern in check_patterns:
+        if pattern.lower() in content_lower:
+            return {
+                "valid": False,
+                "reason": f"SQL injection pattern detected: '{pattern}'",
+                "pattern": pattern,
+            }
+
+    return {"valid": True, "reason": "No SQL injection patterns detected"}
+
+
+def sanitize_content(content: str, pattern: str, replacement: str = "[REDACTED]") -> dict[str, Any]:
+    """Sanitize content by removing or redacting a problematic pattern.
+
+    Args:
+        content: The content to sanitize.
+        pattern: The pattern to remove/redact.
+        replacement: Text to replace the pattern with (default: "[REDACTED]").
+
+    Returns:
+        Dict with 'sanitized' (str), 'original' (str), 'pattern_removed' (str),
+        and 'modified' (bool) keys.
+    """
+    # Try case-insensitive replacement
+    pattern_regex = re.compile(re.escape(pattern), re.IGNORECASE)
+
+    # Find all matches for reporting
+    matches = pattern_regex.findall(content)
+    modified = len(matches) > 0
+
+    # Replace all occurrences
+    sanitized = pattern_regex.sub(replacement, content)
+
+    return {
+        "sanitized": sanitized,
+        "original": content,
+        "pattern_removed": pattern,
+        "modified": modified,
+        "replacements_count": len(matches),
     }

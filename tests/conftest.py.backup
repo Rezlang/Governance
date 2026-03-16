@@ -1,14 +1,30 @@
 """Pytest configuration and fixtures for model governance tests."""
 
-import os
 from typing import Any
 
 import pytest
 
 
 # Verbosity levels: 0=low, 1=medium, 2=high
-# Read from environment variable (set by run_tests_with_output.py)
-VERBOSITY_LEVEL = int(os.environ.get("TEST_VERBOSITY", "1"))
+VERBOSITY_LEVEL = 1  # Default to medium
+
+
+def pytest_addoption(parser):
+    """Add custom command line options to pytest."""
+    parser.addoption(
+        "--verbosity-level",
+        "-V",
+        action="store",
+        default="1",
+        choices=["0", "1", "2"],
+        help="Test verbosity level: 0=low (minimal), 1=medium (standard), 2=high (detailed)",
+    )
+
+
+def pytest_configure(config):
+    """Configure pytest based on options."""
+    global VERBOSITY_LEVEL
+    VERBOSITY_LEVEL = int(config.getoption("--verbosity-level", "1"))
 
 
 @pytest.fixture
@@ -65,10 +81,6 @@ class TestOutput:
             elif hasattr(value, 'value'):
                 # Handle EnforcementMode enum
                 print(f"[INPUT] {label}: {value.value}")
-            elif isinstance(value, (list, tuple)):
-                print(f"[INPUT] {label}: {type(value).__name__} with {len(value)} items")
-            elif isinstance(value, dict):
-                print(f"[INPUT] {label}: dict with {len(value)} keys")
             else:
                 print(f"[INPUT] {label}: {value}")
         else:
@@ -85,15 +97,6 @@ class TestOutput:
             elif isinstance(value, dict):
                 print(f"  Type: dict")
                 print(f"  Keys: {list(value.keys())}")
-                import json
-                print(f"  Full: {json.dumps(value, indent=2, default=str)}")
-            elif isinstance(value, (list, tuple)):
-                print(f"  Type: {type(value).__name__}")
-                print(f"  Length: {len(value)}")
-                if len(value) <= 5:
-                    print(f"  Items: {value}")
-                else:
-                    print(f"  Items (first 3): {value[:3]}")
             else:
                 print(f"  Value: {repr(value)}")
 
@@ -109,97 +112,51 @@ class TestOutput:
                 warnings_info = ""
                 if hasattr(value, 'warnings') and value.warnings:
                     warnings_info = f", {len(value.warnings)} warnings"
-                errors_info = ""
                 if hasattr(value, 'errors') and value.errors:
                     errors_info = f", {len(value.errors)} errors"
                 print(f"[OUTPUT] {label}: {status}{warnings_info}{errors_info}")
-            elif isinstance(value, bool):
-                print(f"[OUTPUT] {label}: {value}")
-            elif isinstance(value, (int, float)):
-                print(f"[OUTPUT] {label}: {value}")
             elif isinstance(value, str):
                 preview = value[:100] + "..." if len(value) > 100 else value
                 print(f"[OUTPUT] {label}: {preview}")
             else:
-                print(f"[OUTPUT] {label}: {type(value).__name__}")
+                print(f"[OUTPUT] {label}: {value}")
         else:
-            # High: show full details with context
+            # High: show full details
             print(f"\n[OUTPUT] {label}:")
-
-            # Handle PolicyResult
-            if hasattr(value, '__class__') and 'PolicyResult' in value.__class__.__name__:
-                print(f"  Type: PolicyResult")
-                print(f"  Allowed: {value.allowed}")
-                if hasattr(value, 'reason'):
-                    print(f"  Reason: {value.reason}")
-                if hasattr(value, 'confidence'):
-                    print(f"  Confidence: {value.confidence}")
-
-            # Handle PipelineResult
-            elif hasattr(value, '__class__') and 'PipelineResult' in value.__class__.__name__:
-                print(f"  Type: PipelineResult")
-                print(f"  Success: {value.success}")
-                print(f"  Blocked: {value.blocked}")
-                if hasattr(value, 'mode'):
-                    print(f"  Mode: {value.mode}")
-                if hasattr(value, 'trust_level'):
-                    print(f"  Trust Level: {value.trust_level}")
-                if hasattr(value, 'block_reason') and value.block_reason:
-                    print(f"  Block Reason: {value.block_reason}")
-                # Show modification details for MODIFY mode
-                if hasattr(value, 'modified') and value.modified:
-                    print(f"  Modified: True")
-                    if hasattr(value, 'original_content') and value.original_content:
-                        print(f"  Original Content: {repr(value.original_content[:100])}{'...' if len(value.original_content) > 100 else ''}")
-                    if hasattr(value, 'data') and value.data:
-                        print(f"  Modified Content: {repr(value.data)[:100]}{'...' if len(repr(value.data)) > 100 else ''}")
-                # Show warnings and metadata in high verbosity
-                if hasattr(value, 'warnings') and value.warnings:
-                    print(f"  Warnings: {len(value.warnings)} warning(s)")
-                if hasattr(value, 'metadata') and value.metadata and value.metadata.get('pattern_removed'):
-                    print(f"  Pattern Removed: {value.metadata.get('pattern_removed')}")
-                    print(f"  Replacements: {value.metadata.get('replacements_count', 0)} occurrence(s)")
-
-            # Handle EnforcementDecision
-            elif hasattr(value, '__class__') and 'EnforcementDecision' in value.__class__.__name__:
-                print(f"  Type: EnforcementDecision")
-                if hasattr(value, 'action'):
-                    print(f"  Action: {value.action}")
-                if hasattr(value, 'reason'):
-                    print(f"  Reason: {value.reason}")
-
-            # Handle simple types
-            elif isinstance(value, bool):
-                print(f"  Value: {value}")
-            elif isinstance(value, (int, float)):
-                print(f"  Value: {value}")
+            if hasattr(value, '__dict__'):
+                for key, val in value.__dict__.items():
+                    if isinstance(val, (str, int, bool, float)) or val is None:
+                        print(f"  {key}: {repr(val)}")
+                    elif isinstance(val, list):
+                        if val:
+                            print(f"  {key}: [list with {len(val)} items]")
+                            if self.verbosity >= 2:
+                                for i, item in enumerate(val[:10]):  # Show first 10
+                                    print(f"    [{i}]: {repr(item)}")
+                                if len(val) > 10:
+                                    print(f"    ... and {len(val) - 10} more")
+                        else:
+                            print(f"  {key}: []")
+                    elif isinstance(val, dict):
+                        if val:
+                            print(f"  {key}: {{dict with {len(val)} keys}}")
+                            if self.verbosity >= 2:
+                                for k, v in list(val.items())[:10]:
+                                    print(f"    {k}: {repr(v)}")
+                                if len(val) > 10:
+                                    print(f"    ... and {len(val) - 10} more keys")
+                        else:
+                            print(f"  {key}: {{}}")
+                    else:
+                        print(f"  {key}: {type(val).__name__}")
+            elif isinstance(value, dict):
+                import json
+                print(f"  {json.dumps(value, indent=2, default=str)}")
             elif isinstance(value, str):
                 print(f"  Content: {repr(value)}")
                 print(f"  Length: {len(value)} characters")
-            elif isinstance(value, (list, tuple)):
-                print(f"  Type: {type(value).__name__}")
-                print(f"  Length: {len(value)}")
-                if value:
-                    print(f"  Items:")
-                    for i, item in enumerate(value):
-                        print(f"    [{i}]: {repr(item)}")
-                else:
-                    print(f"  Items: []")
-            elif isinstance(value, dict):
-                print(f"  Type: dict")
-                print(f"  Keys: {list(value.keys())}")
-                import json
-                print(f"  Full: {json.dumps(value, indent=2, default=str)}")
             else:
-                print(f"  Type: {type(value).__name__}")
-                if hasattr(value, '__dict__'):
-                    for key, val in value.__dict__.items():
-                        if isinstance(val, (str, int, bool, float)) or val is None:
-                            print(f"  {key}: {repr(val)}")
-                        elif isinstance(val, list) and len(val) <= 3:
-                            print(f"  {key}: {val}")
-                        else:
-                            print(f"  {key}: {type(val).__name__}")
+                print(f"  Value: {repr(value)}")
 
     def print_warnings(self, warnings: list) -> None:
         """Print all warnings in medium or high verbosity."""

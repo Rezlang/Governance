@@ -2,8 +2,9 @@
 
 from typing import Protocol, runtime_checkable
 
+from model_governance.checkers.base import CheckerResult
 from model_governance.pipelines.base import OutputPipeline, PipelineResult
-from model_governance.validators.topics import TopicGuard, TopicGuardResult
+from model_governance.validators.topics import TopicGuard
 
 
 @runtime_checkable
@@ -14,7 +15,7 @@ class SemanticChecker(Protocol):
     to detect harmful content.
     """
 
-    async def check(self, content: str, context: dict) -> tuple[bool, list[str]]:
+    async def check(self, content: str, context: dict) -> CheckerResult:
         """Check content for safety using semantic analysis.
 
         Args:
@@ -22,7 +23,7 @@ class SemanticChecker(Protocol):
             context: Additional context for the check.
 
         Returns:
-            A tuple of (is_safe, list_of_issues).
+            CheckerResult with safety check outcome.
         """
         ...
 
@@ -40,7 +41,7 @@ class PatternBasedSemanticChecker:
         Args:
             guards: List of topic guards to use.
         """
-        from model_governance.validators.topics import SelfHarmGuard, HateSpeechGuard, ThreatsGuard
+        from model_governance.validators.topics import HateSpeechGuard, SelfHarmGuard, ThreatsGuard
 
         self._guards = guards or [
             SelfHarmGuard(),
@@ -48,7 +49,7 @@ class PatternBasedSemanticChecker:
             ThreatsGuard(),
         ]
 
-    async def check(self, content: str, context: dict | None = None) -> tuple[bool, list[str]]:
+    async def check(self, content: str, context: dict | None = None) -> CheckerResult:
         """Check content using semantic guards.
 
         Args:
@@ -56,17 +57,30 @@ class PatternBasedSemanticChecker:
             context: Additional context.
 
         Returns:
-            Tuple of (is_safe, list_of_issues).
+            CheckerResult with safety check outcome.
         """
         issues: list[str] = []
+        confidences: list[float] = []
         context = context or {}
 
         for guard in self._guards:
             result = await guard.check(content, context)
             if not result.is_safe:
                 issues.append(f"{guard.name}: {result.reason}")
+                confidences.append(result.confidence)
 
-        return len(issues) == 0, issues
+        if issues:
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.8
+            return CheckerResult.unsafe(
+                issues=issues,
+                confidence=avg_confidence,
+                metadata={"checker": "PatternBasedSemanticChecker"},
+            )
+
+        return CheckerResult.safe(
+            confidence=1.0,
+            metadata={"checker": "PatternBasedSemanticChecker"},
+        )
 
 
 class SemanticCheckPipeline(OutputPipeline):
@@ -99,15 +113,15 @@ class SemanticCheckPipeline(OutputPipeline):
         Returns:
             PipelineResult with safety check results.
         """
-        is_safe, issues = await self._checker.check(input_data, {})
+        result = await self._checker.check(input_data, {})
 
-        if not is_safe:
+        if not result.is_safe:
             return PipelineResult(
                 success=False,
-                errors=issues,
+                errors=result.issues,
                 blocked=True,
-                block_reason=f"Semantic safety check failed: {'; '.join(issues)}",
-                metadata={"method": "semantic", "threshold": self._threshold},
+                block_reason=f"Semantic safety check failed: {'; '.join(result.issues)}",
+                metadata={"method": "semantic", "threshold": self._threshold, "confidence": result.confidence},
             )
 
         return await self._next_process(input_data)

@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from model_governance.core.patterns import SecurityPatterns
 from model_governance.policies.base import Policy, PolicyResult
 
 
@@ -88,23 +89,37 @@ class ContentBlockingPolicy(Policy):
 
         return PolicyResult(allowed=True, reason="No blocked patterns found")
 
+    def modify_content(self, content: str) -> str:
+        """Remove blocked patterns from content.
+
+        Args:
+            content: The content to modify.
+
+        Returns:
+            Content with blocked patterns removed or replaced.
+        """
+        modified = content
+        if self._use_regex:
+            for pattern in self._patterns:
+                # Remove matched patterns
+                modified = pattern.sub("[REMOVED]", modified)
+        else:
+            for pattern in self._patterns:
+                # Case-insensitive replacement
+                if not self._case_sensitive:
+                    pattern_lower = pattern.lower()
+                    # Find all occurrences and replace them
+                    while pattern_lower in modified.lower():
+                        idx = modified.lower().find(pattern_lower)
+                        if idx != -1:
+                            modified = modified[:idx] + "[REMOVED]" + modified[idx + len(pattern):]
+                else:
+                    modified = modified.replace(pattern, "[REMOVED]")
+        return modified
+
 
 class PromptInjectionPolicy(ContentBlockingPolicy):
     """Policy to detect and block prompt injection attempts."""
-
-    DEFAULT_PATTERNS = [
-        "ignore previous",
-        "disregard above",
-        "override instructions",
-        "forget everything",
-        "new instructions:",
-        "ignore your programming",
-        "disregard your training",
-        "<end>",
-        "<|end|>",
-        "[DONE]",
-        "\\begin{system}",
-    ]
 
     def __init__(self, priority: int = 100, patterns: list[str] | None = None) -> None:
         """Initialize the prompt injection policy.
@@ -113,9 +128,10 @@ class PromptInjectionPolicy(ContentBlockingPolicy):
             priority: Policy priority.
             patterns: Custom patterns to use, or defaults if not provided.
         """
+        default_patterns = SecurityPatterns.get_injection_patterns()
         super().__init__(
             name="prompt_injection",
-            patterns=patterns or self.DEFAULT_PATTERNS,
+            patterns=patterns or default_patterns,
             priority=priority,
             case_sensitive=False,
         )
@@ -124,17 +140,6 @@ class PromptInjectionPolicy(ContentBlockingPolicy):
 class MaliciousCodePolicy(ContentBlockingPolicy):
     """Policy to detect potentially malicious code patterns."""
 
-    DEFAULT_PATTERNS = [
-        "eval(",
-        "exec(",
-        "compile(",
-        "__import__",
-        "subprocess",
-        "os.system",
-        "pickle.loads",
-        "marshal.loads",
-    ]
-
     def __init__(self, priority: int = 90, patterns: list[str] | None = None) -> None:
         """Initialize the malicious code policy.
 
@@ -142,9 +147,10 @@ class MaliciousCodePolicy(ContentBlockingPolicy):
             priority: Policy priority.
             patterns: Custom patterns to use, or defaults if not provided.
         """
+        default_patterns = SecurityPatterns.get_code_execution_patterns()
         super().__init__(
             name="malicious_code",
-            patterns=patterns or self.DEFAULT_PATTERNS,
+            patterns=patterns or default_patterns,
             priority=priority,
             case_sensitive=False,
         )

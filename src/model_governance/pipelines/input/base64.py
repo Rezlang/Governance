@@ -1,10 +1,10 @@
 """Base64 content pipeline for encoded input validation."""
 
 import base64
-from typing import Any
 
 from pydantic import BaseModel, Field
 
+from model_governance.core.modes import EnforcementMode
 from model_governance.pipelines.base import InputPipeline, PipelineResult
 from model_governance.trust.classifier import TrustClassifier, TrustContext
 from model_governance.trust.levels import TrustLevel
@@ -30,6 +30,7 @@ class Base64Pipeline(InputPipeline):
         classifier: TrustClassifier | None = None,
         max_decoded_size: int = 1024 * 1024,  # 1MB default
         allow_binary: bool = False,
+        mode: EnforcementMode = EnforcementMode.BLOCK,
     ) -> None:
         """Initialize the base64 pipeline.
 
@@ -37,8 +38,9 @@ class Base64Pipeline(InputPipeline):
             classifier: Optional trust classifier.
             max_decoded_size: Maximum decoded content size in bytes.
             allow_binary: Whether to allow binary content after decoding.
+            mode: The enforcement mode.
         """
-        super().__init__()
+        super().__init__(mode=mode)
         self._classifier = classifier or TrustClassifier()
         self._max_decoded_size = max_decoded_size
         self._allow_binary = allow_binary
@@ -48,6 +50,7 @@ class Base64Pipeline(InputPipeline):
         input_data: str,
         encoding: str = "utf-8",
         authentication_level: TrustLevel | None = None,
+        mode: EnforcementMode | None = None,
     ) -> PipelineResult:
         """Process base64 encoded content with validation.
 
@@ -55,10 +58,13 @@ class Base64Pipeline(InputPipeline):
             input_data: Base64 encoded content string.
             encoding: Expected text encoding after decoding.
             authentication_level: Optional trust level from authentication.
+            mode: The enforcement mode.
 
         Returns:
             PipelineResult with decoded content and trust level.
         """
+        effective_mode = mode or self._mode
+
         # Validate base64 format
         try:
             content_bytes = base64.b64decode(input_data, validate=True)
@@ -68,6 +74,7 @@ class Base64Pipeline(InputPipeline):
                 errors=["Invalid base64 encoding"],
                 blocked=True,
                 block_reason="Invalid base64 content",
+                mode=effective_mode.value,
             )
 
         # Check size
@@ -80,6 +87,7 @@ class Base64Pipeline(InputPipeline):
                 ],
                 blocked=True,
                 block_reason="Decoded content exceeds size limit",
+                mode=effective_mode.value,
             )
 
         # Try to decode as text
@@ -95,6 +103,7 @@ class Base64Pipeline(InputPipeline):
                     errors=[f"Content cannot be decoded as {encoding}"],
                     blocked=True,
                     block_reason="Binary content not allowed",
+                    mode=effective_mode.value,
                 )
 
         try:
@@ -105,6 +114,7 @@ class Base64Pipeline(InputPipeline):
                 errors=[f"Validation failed: {e}"],
                 blocked=True,
                 block_reason="Invalid base64 input format",
+                mode=effective_mode.value,
             )
 
         # Inspect decoded content for potential issues
@@ -117,6 +127,7 @@ class Base64Pipeline(InputPipeline):
                 errors=["Potentially malicious content detected"],
                 blocked=True,
                 block_reason="Suspicious content pattern detected",
+                mode=effective_mode.value,
             )
 
         # Classify trust level
@@ -131,6 +142,7 @@ class Base64Pipeline(InputPipeline):
             data={"decoded": decoded_content, "original": validated.content, "encoding": encoding},
             trust_level=trust_level,
             blocked=False,
+            mode=effective_mode.value,
             metadata={
                 "source": "base64",
                 "encoding": encoding,

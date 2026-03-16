@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
+from model_governance.core.modes import EnforcementMode
 from model_governance.trust.levels import TrustLevel
 
 T = TypeVar("T")
@@ -22,6 +23,10 @@ class PipelineResult:
         blocked: Whether the content was blocked.
         block_reason: Reason for blocking, if blocked.
         metadata: Additional metadata about the processing.
+        mode: The enforcement mode used (detect, modify, block).
+        warnings: List of warnings for detect mode.
+        modified: Whether content was modified.
+        original_content: Original content before modification.
     """
 
     success: bool
@@ -31,6 +36,10 @@ class PipelineResult:
     blocked: bool = False
     block_reason: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    mode: str = "block"
+    warnings: list[str] = field(default_factory=list)
+    modified: bool = False
+    original_content: str | None = None
 
     def add_error(self, error: str) -> None:
         """Add an error to the result.
@@ -41,6 +50,14 @@ class PipelineResult:
         self.errors.append(error)
         self.success = False
 
+    def add_warning(self, warning: str) -> None:
+        """Add a warning to the result.
+
+        Args:
+            warning: The warning message to add.
+        """
+        self.warnings.append(warning)
+
 
 class PipelineStage(ABC, Generic[T, R]):
     """Base class for all pipeline stages.
@@ -49,13 +66,15 @@ class PipelineStage(ABC, Generic[T, R]):
     pattern. Each stage processes input and passes it to the next stage.
     """
 
-    def __init__(self, next_stage: object = None) -> None:
+    def __init__(self, next_stage: object = None, mode: EnforcementMode = EnforcementMode.BLOCK) -> None:
         """Initialize the pipeline stage.
 
         Args:
             next_stage: The next stage in the pipeline chain.
+            mode: The enforcement mode.
         """
         self._next = next_stage
+        self._mode = mode
 
     @abstractmethod
     async def process(self, input_data: T) -> PipelineResult:
@@ -80,7 +99,7 @@ class PipelineStage(ABC, Generic[T, R]):
         """
         if self._next:
             return await self._next.process(input_data)
-        return PipelineResult(success=True, data=input_data)
+        return PipelineResult(success=True, data=input_data, mode=self._mode.value)
 
     def set_next(self, next_stage: "PipelineStage[T, R]") -> "PipelineStage[T, R]":
         """Set the next stage in the pipeline chain.

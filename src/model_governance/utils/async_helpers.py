@@ -61,7 +61,7 @@ async def run_with_timeout(coro: Any, timeout: float, default: Any = None) -> An
     """
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return default
 
 

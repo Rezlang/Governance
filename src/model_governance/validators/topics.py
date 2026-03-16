@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from model_governance.core.patterns import SecurityPatterns
+
 
 @dataclass
 class TopicGuardResult:
@@ -83,19 +85,6 @@ class TopicGuard(ABC):
 class SelfHarmGuard(TopicGuard):
     """Guard for self-harm related content."""
 
-    DEFAULT_PATTERNS = [
-        "kill myself",
-        "want to die",
-        "suicide",
-        "end my life",
-        "hurt myself",
-        "self harm",
-        "cut myself",
-        "commit suicide",
-        "don't want to live",
-        "better off dead",
-    ]
-
     def __init__(self, threshold: float = 0.7, patterns: list[str] | None = None) -> None:
         """Initialize the self-harm guard.
 
@@ -103,7 +92,8 @@ class SelfHarmGuard(TopicGuard):
             threshold: Confidence threshold for blocking.
             patterns: Custom patterns, or defaults if not provided.
         """
-        super().__init__(name="self_harm", patterns=patterns or self.DEFAULT_PATTERNS, threshold=threshold)
+        default_patterns = SecurityPatterns.get_self_harm_patterns()
+        super().__init__(name="self_harm", patterns=patterns or default_patterns, threshold=threshold)
 
     async def check(self, content: str, context: dict[str, Any] | None = None) -> TopicGuardResult:
         """Check content for self-harm related content.
@@ -137,18 +127,6 @@ class SelfHarmGuard(TopicGuard):
 class HateSpeechGuard(TopicGuard):
     """Guard for hate speech content."""
 
-    DEFAULT_PATTERNS = [
-        "hate speech",
-        "racial slur",
-        "discriminat",
-        "all [group] are",
-        "[group] should be",
-        "inferior race",
-        "superior race",
-        "ethnic cleansing",
-        "kill all [group]",
-    ]
-
     def __init__(self, threshold: float = 0.7, patterns: list[str] | None = None) -> None:
         """Initialize the hate speech guard.
 
@@ -156,7 +134,8 @@ class HateSpeechGuard(TopicGuard):
             threshold: Confidence threshold for blocking.
             patterns: Custom patterns, or defaults if not provided.
         """
-        super().__init__(name="hate_speech", patterns=patterns or self.DEFAULT_PATTERNS, threshold=threshold)
+        default_patterns = SecurityPatterns.get_hate_speech_patterns()
+        super().__init__(name="hate_speech", patterns=patterns or default_patterns, threshold=threshold)
 
     async def check(self, content: str, context: dict[str, Any] | None = None) -> TopicGuardResult:
         """Check content for hate speech.
@@ -190,23 +169,6 @@ class HateSpeechGuard(TopicGuard):
 class ThreatsGuard(TopicGuard):
     """Guard for threats and violent content."""
 
-    DEFAULT_PATTERNS = [
-        "i will kill",
-        "going to kill",
-        "i will hurt",
-        "going to hurt",
-        "threaten to",
-        "death threat",
-        "bomb threat",
-        "shoot up",
-        "mass shooting",
-        "violence against",
-        "physically harm",
-        "assault",
-        "murder",
-        "terrorist attack",
-    ]
-
     def __init__(self, threshold: float = 0.7, patterns: list[str] | None = None) -> None:
         """Initialize the threats guard.
 
@@ -214,7 +176,8 @@ class ThreatsGuard(TopicGuard):
             threshold: Confidence threshold for blocking.
             patterns: Custom patterns, or defaults if not provided.
         """
-        super().__init__(name="threats", patterns=patterns or self.DEFAULT_PATTERNS, threshold=threshold)
+        default_patterns = SecurityPatterns.get_threats_patterns()
+        super().__init__(name="threats", patterns=patterns or default_patterns, threshold=threshold)
 
     async def check(self, content: str, context: dict[str, Any] | None = None) -> TopicGuardResult:
         """Check content for threats and violent content.
@@ -248,14 +211,6 @@ class ThreatsGuard(TopicGuard):
 class SexualContentGuard(TopicGuard):
     """Guard for sexually explicit content."""
 
-    DEFAULT_PATTERNS = [
-        "pornography",
-        "sexually explicit",
-        "nsfw",
-        "adult content",
-        "explicit content",
-    ]
-
     def __init__(self, threshold: float = 0.7, patterns: list[str] | None = None) -> None:
         """Initialize the sexual content guard.
 
@@ -263,8 +218,9 @@ class SexualContentGuard(TopicGuard):
             threshold: Confidence threshold for blocking.
             patterns: Custom patterns, or defaults if not provided.
         """
+        default_patterns = SecurityPatterns.get_sexual_content_patterns()
         super().__init__(
-            name="sexual_content", patterns=patterns or self.DEFAULT_PATTERNS, threshold=threshold
+            name="sexual_content", patterns=patterns or default_patterns, threshold=threshold
         )
 
     async def check(self, content: str, context: dict[str, Any] | None = None) -> TopicGuardResult:

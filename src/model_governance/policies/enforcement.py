@@ -1,7 +1,6 @@
 """Enforcement mechanisms for policy violations."""
 
 from dataclasses import dataclass
-from enum import Enum, auto
 
 from model_governance.policies.base import PolicyAction, PolicyResult
 
@@ -188,3 +187,96 @@ class CompositeEnforcer(EnforcementMechanism):
         policy_name = policy_result.policy_name
         enforcer = self._enforcers.get(policy_name, self._default_enforcer)
         return await enforcer.enforce(policy_result, content, context)
+
+
+class DetectEnforcer(EnforcementMechanism):
+    """Enforcer that detects violations but allows content.
+
+    In detect mode, violations are logged as warnings but the content
+    is allowed to pass through.
+    """
+
+    async def enforce(
+        self, policy_result: PolicyResult, content: str, context: dict
+    ) -> EnforcementDecision:
+        """Enforce the policy decision with detect mode.
+
+        Args:
+            policy_result: The result from policy evaluation.
+            content: The content being evaluated.
+            context: Additional context for enforcement.
+
+        Returns:
+            EnforcementDecision with WARN action for violations (allows content).
+        """
+        if not policy_result.allowed:
+            return EnforcementDecision(
+                action=PolicyAction.WARN,
+                reason=f"[DETECTED] {policy_result.reason}",
+                confidence=policy_result.confidence,
+                metadata={"detection": True},
+            )
+
+        return EnforcementDecision(action=PolicyAction.ALLOW, reason="Allowed")
+
+
+class ModifyEnforcer(EnforcementMechanism):
+    """Enforcer that modifies content instead of blocking.
+
+    In modify mode, problematic parts of the content are removed or
+    sanitized while allowing the rest to pass through.
+    """
+
+    def __init__(self, replacement_char: str = "***") -> None:
+        """Initialize the modify enforcer.
+
+        Args:
+            replacement_char: Character(s) to replace problematic content with.
+        """
+        self._replacement_char = replacement_char
+
+    async def enforce(
+        self, policy_result: PolicyResult, content: str, context: dict
+    ) -> EnforcementDecision:
+        """Enforce the policy decision with modify mode.
+
+        Args:
+            policy_result: The result from policy evaluation.
+            content: The content being evaluated.
+            context: Additional context for enforcement.
+
+        Returns:
+            EnforcementDecision with MODIFY action for violations.
+        """
+        if not policy_result.allowed:
+            modified_content = self._modify_content(content, policy_result)
+            return EnforcementDecision(
+                action=PolicyAction.MODIFY,
+                reason=f"[MODIFIED] {policy_result.reason}",
+                modified_content=modified_content,
+                confidence=policy_result.confidence,
+                metadata={"modified": True},
+            )
+
+        return EnforcementDecision(action=PolicyAction.ALLOW, reason="Allowed")
+
+    def _modify_content(self, content: str, policy_result: PolicyResult) -> str:
+        """Modify content based on policy violation.
+
+        Args:
+            content: The content to modify.
+            policy_result: The policy result with violation details.
+
+        Returns:
+            Modified content.
+        """
+        # Get the matched pattern from metadata
+        pattern = policy_result.metadata.get("matched_pattern", "")
+        if pattern:
+            # Replace the matched pattern with placeholder
+            modified = content.replace(pattern, self._replacement_char)
+            return modified
+
+        # If no specific pattern, return original
+        return content
+

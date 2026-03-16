@@ -1,7 +1,13 @@
 """Core foundation for the model governance system."""
 
 from model_governance.core.base import GovernanceComponent
-from model_governance.core.config import CheckerConfig, BlockingConfig, GovernanceConfig, TrustLevelConfig, load_config
+from model_governance.core.config import (
+    BlockingConfig,
+    CheckerConfig,
+    GovernanceConfig,
+    TrustLevelConfig,
+    load_config,
+)
 from model_governance.core.exceptions import (
     GovernanceError,
     PipelineError,
@@ -9,6 +15,8 @@ from model_governance.core.exceptions import (
     TrustLevelError,
     ValidationError,
 )
+from model_governance.core.modes import EnforcementMode
+from model_governance.core.patterns import SecurityPatterns
 
 __all__ = [
     "GovernanceComponent",
@@ -22,4 +30,6 @@ __all__ = [
     "PolicyViolationError",
     "TrustLevelError",
     "ValidationError",
+    "EnforcementMode",
+    "SecurityPatterns",
 ]

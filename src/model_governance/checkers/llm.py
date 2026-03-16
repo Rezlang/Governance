@@ -1,8 +1,7 @@
 """LLM-based checker implementation using zai-sdk."""
 
-from typing import Any
-
-from model_governance.validators.topics import SelfHarmGuard, HateSpeechGuard, ThreatsGuard
+from model_governance.checkers.base import CheckerResult
+from model_governance.validators.topics import HateSpeechGuard, SelfHarmGuard, ThreatsGuard
 
 
 class ZaiLLMChecker:
@@ -37,7 +36,7 @@ class ZaiLLMChecker:
             ThreatsGuard(threshold=confidence_threshold),
         ]
 
-    async def check(self, content: str, context: dict) -> tuple[bool, str, float]:
+    async def check(self, content: str, context: dict) -> CheckerResult:
         """Check content using LLM analysis.
 
         In production, this would:
@@ -50,16 +49,27 @@ class ZaiLLMChecker:
             context: Additional context for the check.
 
         Returns:
-            Tuple of (is_safe, reason, confidence).
+            CheckerResult with safety check outcome.
         """
         # Production implementation would use zai-sdk
         # For now, use topic guards as fallback
         for guard in self._guards:
             result = await guard.check(content, context)
             if not result.is_safe:
-                return False, result.reason, result.confidence
+                return CheckerResult.unsafe(
+                    issues=[result.reason],
+                    confidence=result.confidence,
+                    metadata={
+                        "checker": "ZaiLLMChecker",
+                        "guard": guard.name,
+                        "model": self._model,
+                    },
+                )
 
-        return True, "LLM safety check passed", 1.0
+        return CheckerResult.safe(
+            confidence=1.0,
+            metadata={"checker": "ZaiLLMChecker", "model": self._model},
+        )
 
     async def initialize_client(self) -> None:
         """Initialize the zai-sdk client.

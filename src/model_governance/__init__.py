@@ -33,108 +33,107 @@ __version__ = "0.1.0"
 __author__ = "Model Governance Team"
 
 # Core exports
-from model_governance.core import (
-    GovernanceConfig,
-    CheckerConfig,
-    BlockingConfig,
-    TrustLevelConfig,
-    GovernanceError,
-    PipelineError,
-    PolicyViolationError,
-    TrustLevelError,
-    ValidationError,
-    load_config,
-)
-
-# Trust level exports
-from model_governance.trust import (
-    TrustLevel,
-    TrustContext,
-    TrustClassifier,
-    TrustPolicyWithOptions,
-    BlockLowTrustPolicy,
-    RequireAuthPolicy,
-    parse_trust_level,
-)
-
-# Pipeline exports
-from model_governance.pipelines import PipelineStage, PipelineResult, InputPipeline, OutputPipeline
-
-# Input pipelines
-from model_governance.pipelines.input import (
-    SystemPromptPipeline,
-    UserInputPipeline,
-    ToolInputPipeline,
-    AttachmentPipeline,
-    Base64Pipeline,
-)
-
-# Output pipelines
-from model_governance.pipelines.output import (
-    SemanticCheckPipeline,
-    LLMCheckPipeline,
-    CompositeOutputPipeline,
-)
-
-# Policy exports
-from model_governance.policies import (
-    Policy,
-    PolicyResult,
-    PolicyAction,
-    PolicyDecision,
-    PolicyRegistry,
-    ContentBlockingPolicy,
-    PromptInjectionPolicy,
-    MaliciousCodePolicy,
-)
-
-from model_governance.policies.content import (
-    HTMLBlockingPolicy,
-    JSONBlockingPolicy,
-    CodeBlockPolicy,
-)
-
-from model_governance.policies.format import (
-    JSONEnforcementPolicy,
-    StructuredOutputPolicy,
-    MaxLengthPolicy,
-)
-
-from model_governance.policies.enforcement import (
-    EnforcementMechanism,
-    BlockingEnforcer,
-    StrictEnforcer,
-    ReviewEnforcer,
-    CompositeEnforcer,
-    EnforcementDecision,
-)
-
-# Validator exports
-from model_governance.validators import (
-    validate_no_injection,
-    validate_no_code_execution,
-    validate_length,
-    TopicGuard,
-    SelfHarmGuard,
-    HateSpeechGuard,
-    ThreatsGuard,
-)
-
 # Checker exports
 from model_governance.checkers import (
     EmbeddingSemanticChecker,
     ZaiLLMChecker,
 )
+from model_governance.core import (
+    BlockingConfig,
+    CheckerConfig,
+    EnforcementMode,
+    GovernanceConfig,
+    GovernanceError,
+    PipelineError,
+    PolicyViolationError,
+    TrustLevelConfig,
+    TrustLevelError,
+    ValidationError,
+    load_config,
+)
+
+# Pipeline exports
+from model_governance.pipelines import InputPipeline, OutputPipeline, PipelineResult, PipelineStage
+
+# Input pipelines
+from model_governance.pipelines.input import (
+    AttachmentPipeline,
+    Base64Pipeline,
+    SystemPromptPipeline,
+    ToolInputPipeline,
+    UserInputPipeline,
+)
+
+# Output pipelines
+from model_governance.pipelines.output import (
+    CompositeOutputPipeline,
+    LLMCheckPipeline,
+    SemanticCheckPipeline,
+)
+
+# Policy exports
+from model_governance.policies import (
+    ContentBlockingPolicy,
+    MaliciousCodePolicy,
+    Policy,
+    PolicyAction,
+    PolicyDecision,
+    PolicyEvaluator,
+    PolicyRegistry,
+    PolicyResult,
+    PromptInjectionPolicy,
+)
+from model_governance.policies.content import (
+    CodeBlockPolicy,
+    HTMLBlockingPolicy,
+    JSONBlockingPolicy,
+)
+from model_governance.policies.enforcement import (
+    BlockingEnforcer,
+    CompositeEnforcer,
+    EnforcementDecision,
+    EnforcementMechanism,
+    ReviewEnforcer,
+    StrictEnforcer,
+)
+from model_governance.policies.format import (
+    JSONEnforcementPolicy,
+    MaxLengthPolicy,
+    StructuredOutputPolicy,
+)
+
+# Trust level exports
+from model_governance.trust import (
+    BlockLowTrustPolicy,
+    RequireAuthPolicy,
+    TrustClassifier,
+    TrustContext,
+    TrustLevel,
+    TrustPolicyWithOptions,
+    parse_trust_level,
+)
 
 # Utility exports
 from model_governance.utils import (
     apply_policies,
-    with_trust_level,
     async_pipeline,
+    retry_with_backoff,
     run_parallel_pipelines,
     run_with_timeout,
-    retry_with_backoff,
+    with_trust_level,
 )
+
+# Validator exports
+from model_governance.validators import (
+    HateSpeechGuard,
+    SelfHarmGuard,
+    ThreatsGuard,
+    TopicGuard,
+    validate_length,
+    validate_no_code_execution,
+    validate_no_injection,
+)
+
 
 # Main governance system class
 class GovernanceSystem:
@@ -182,14 +181,17 @@ class GovernanceSystem:
         self._base64_pipeline = Base64Pipeline(classifier=self._trust_classifier)
 
         # Output pipeline - create default checkers
-        from model_governance.pipelines.output.semantic_check import PatternBasedSemanticChecker
+        from model_governance.pipelines.output.code_block_check import PatternBasedCodeBlockChecker
         from model_governance.pipelines.output.llm_check import MockLLMChecker
+        from model_governance.pipelines.output.semantic_check import PatternBasedSemanticChecker
 
         self._semantic_checker = PatternBasedSemanticChecker()
         self._llm_checker = MockLLMChecker()
+        self._code_block_checker = PatternBasedCodeBlockChecker()
         self._output_pipeline = CompositeOutputPipeline(
             semantic_checker=self._semantic_checker,
             llm_checker=self._llm_checker,
+            code_block_checker=self._code_block_checker,
             enable_parallel=self._config.checker.enable_parallel_checks,
         )
 
@@ -211,6 +213,7 @@ class GovernanceSystem:
         source: str,
         content: str,
         trust_level: str | TrustLevel | None = None,
+        mode: EnforcementMode = EnforcementMode.BLOCK,
         **kwargs: object,
     ) -> PipelineResult:
         """Process input through the appropriate pipeline.
@@ -219,6 +222,7 @@ class GovernanceSystem:
             source: The input source type (system_prompt, user_input, tool_input, attachment, base64).
             content: The input content to process.
             trust_level: Optional trust level string or enum.
+            mode: The enforcement mode.
             **kwargs: Additional parameters specific to the input type.
 
         Returns:
@@ -242,9 +246,11 @@ class GovernanceSystem:
                 errors=[f"Unknown input source: {source}"],
                 blocked=True,
                 block_reason=f"Invalid input source: {source}",
+                mode=mode.value,
             )
 
-        return await pipeline.process(content, **kwargs)
+        # Pass mode through kwargs if the pipeline supports it
+        return await pipeline.process(content, mode=mode, **kwargs)
 
     async def process_output(
         self,
@@ -313,6 +319,7 @@ __all__ = [
     "CheckerConfig",
     "BlockingConfig",
     "TrustLevelConfig",
+    "EnforcementMode",
     "load_config",
     # Exceptions
     "GovernanceError",
@@ -349,6 +356,7 @@ __all__ = [
     "PolicyAction",
     "PolicyDecision",
     "PolicyRegistry",
+    "PolicyEvaluator",
     "ContentBlockingPolicy",
     "PromptInjectionPolicy",
     "MaliciousCodePolicy",

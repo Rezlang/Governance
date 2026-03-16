@@ -1,8 +1,9 @@
 """Decorator utilities for policy application and trust management."""
 
 import asyncio
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 from model_governance.pipelines.base import PipelineResult
 from model_governance.policies.registry import PolicyRegistry
@@ -157,7 +158,7 @@ def timed(timeout: float):
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             try:
                 return await asyncio.wait_for(func(*args, **kwargs), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 from model_governance.core.exceptions import GovernanceError
 
                 raise GovernanceError(f"Operation timed out after {timeout} seconds")
