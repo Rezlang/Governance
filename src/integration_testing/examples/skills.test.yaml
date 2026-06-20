@@ -1,0 +1,51 @@
+# Example test suite for SKILL activation.
+#
+# Skills are invoked by the agent through the built-in "Skill" tool. The harness
+# records each Skill invocation and exposes it by the skill's own name, so you can
+# write expectations using the plain skill name (e.g. "code-review"), not "Skill".
+#
+# Run with:
+#   python -m integration_testing src/integration_testing/examples/skills.test.yaml
+
+name: Skill activation suite
+description: Verifies trigger phrases activate the right skills, and chains between them.
+
+defaults:
+  cwd: .
+  setting_sources: [project]        # REQUIRED so the project's .claude/skills are loaded
+  permission_mode: bypassPermissions
+  max_turns: 8
+
+tests:
+  # --- ACTIVATION: the trigger phrase should activate one skill ---------------
+  - name: code-review-skill-activates
+    type: activation
+    kind: skill
+    prompt: Please review the pending changes on this branch for bugs.
+    expect_activated:
+      - code-review               # matched against the Skill invocation's name
+    expect_not_activated:
+      - security-review           # the wrong skill must not fire
+
+  # --- ACTIVATION: ensure an unrelated phrase does NOT activate the skill ------
+  - name: chitchat-does-not-activate-code-review
+    type: activation
+    kind: skill
+    prompt: Hello! Can you tell me a fun fact about octopuses?
+    expect_not_activated:
+      - code-review
+      - security-review
+
+  # --- CHAIN (manual): activating skill A should lead to skill/tool B ----------
+  - name: security-review-leads-to-report
+    type: chain
+    kind: skill
+    trigger:
+      mode: manual
+      seed: security-review
+      seed_kind: skill
+      prompt: Run a security review of the current changes and write up the findings.
+    expect_activated:
+      - name: generate-report     # a downstream skill...
+        optional: true
+      - mcp__notes__save          # ...or a downstream tool that records findings

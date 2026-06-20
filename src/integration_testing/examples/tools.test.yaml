@@ -1,0 +1,76 @@
+# Example test suite for MCP TOOL activation.
+#
+# A suite is one YAML document: a name, optional shared `defaults`, and a list of
+# `tests`. Run it with:
+#
+#   python -m integration_testing src/integration_testing/examples/tools.test.yaml
+#
+# Tools/skills are matched flexibly:
+#   - "mcp__weather__get_forecast"  -> exact full name
+#   - "get_forecast"                -> loose: matches the bare name regardless of
+#                                      the "mcp__<server>__" prefix
+#   - "mcp__weather__*"             -> glob
+
+name: MCP tool activation suite
+description: Verifies the agent reaches for the right MCP tools, and only those.
+
+# Baseline session config applied to every test (each test may override fields).
+defaults:
+  # model: claude-opus-4-8          # omit to use the SDK default
+  cwd: .                            # skills/MCP resolved relative to here
+  setting_sources: [project]        # load the project's .claude/ settings (MCP, skills)
+  permission_mode: bypassPermissions  # let tools fire without interactive approval
+  max_turns: 8
+  # Define MCP servers here, or rely on the project's settings via setting_sources.
+  # mcp_servers:
+  #   weather:
+  #     command: npx
+  #     args: ["-y", "@example/weather-mcp"]
+
+tests:
+  # --- ACTIVATION: a trigger phrase should activate one specific tool ----------
+  - name: weather-tool-activates-on-forecast-request
+    type: activation
+    kind: tool
+    prompt: What's the weather forecast for Paris tomorrow?
+    expect_activated:
+      - get_forecast            # loose match -> mcp__weather__get_forecast
+    expect_not_activated:
+      - mcp__db__*              # the database server must stay out of it
+
+  # --- ACTIVATION with argument matching --------------------------------------
+  - name: weather-tool-receives-the-city
+    type: activation
+    kind: tool
+    prompt: Give me the 5-day forecast for Tokyo, Japan.
+    expect_activated:
+      - name: mcp__weather__get_forecast
+        match: exact
+        arguments:
+          location: "*Tokyo*"   # string args support glob patterns
+
+  # --- CHAIN (auto): activating search should lead to saving a note -----------
+  - name: search-then-save-chain
+    type: chain
+    kind: tool
+    trigger:
+      mode: auto                # send the prompt as-is; let the model decide
+      prompt: Research the latest on MCP and save a short summary to my notes.
+    expect_activated:
+      - mcp__search__web_search
+      - name: mcp__notes__save
+        arguments:
+          path: "notes/*"
+        optional: false
+
+  # --- CHAIN (manual): force tool A, assert the downstream set ----------------
+  - name: manual-seed-search-triggers-summarizer
+    type: chain
+    kind: tool
+    trigger:
+      mode: manual              # harness prepends a directive forcing the seed
+      seed: mcp__search__web_search
+      seed_kind: tool
+      prompt: Find three recent articles about agent evaluation and summarize them.
+    expect_activated:
+      - mcp__summarize__summarize_text
